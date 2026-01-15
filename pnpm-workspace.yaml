@@ -1,3 +1,4 @@
 onlyBuiltDependencies:
-  - usb-detection
   - drivelist
+  - usb
+  - usb-detection
