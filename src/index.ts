@@ -24,7 +24,11 @@ async function waitForUsb(screen: Widgets.Screen): Promise<string> {
         content: 'Waiting for Raspberry Pi USB connection...\n\n (Connect Pi via USB cable)',
         style: { border: { fg: 'yellow' } },
         cb: () => waitForUsbConnection(),
-    });
+    }).finally(() => pause(
+        screen,
+        `USB device connected\nWaiting to boot...`,
+        30000,
+    ));
 }
 
 async function searchUsb(screen: Widgets.Screen): Promise<string | null> {
@@ -120,6 +124,8 @@ async function configureDlpInput(screen: Widgets.Screen, login: string) {
             } catch (e) {
                 throw new Error(`Failed to configure DLP: ${(e as Error).message}`);
             }
+
+            await pause(screen, `DLP configured for external DPI! Projector should lock to signal.`);
         },
     });
 }
@@ -210,11 +216,6 @@ await makeProgram(async ({ screen }) => {
         status.content('Waiting for USB...');
         deviceName = await waitForUsb(screen);
         status.content(`Connected "${deviceName}", waiting to boot...`);
-        await pause(
-            screen,
-            `USB device connected:\n  ${deviceName}\nWaiting to boot...`,
-            30000,
-        );
     } else {
         deviceName = (await searchUsb(screen)) || 'Unknown';
     }
@@ -239,10 +240,6 @@ await makeProgram(async ({ screen }) => {
         if (i2cOk) {
             step.next('Configuring DLP for external DPI...');
             await configureDlpInput(screen, host);
-            await pause(
-                screen,
-                `DLP configured for external DPI! Projector should lock to signal.`
-            );
         } else {
             throw new Error('I²C test failed.\n Check wiring and reboot Pi before retry.');
         }
