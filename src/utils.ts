@@ -1,4 +1,5 @@
 import os from 'node:os';
+import fs from 'node:fs';
 import drivelist from 'drivelist';
 import chalk from 'chalk';
 import { usb, type Device } from 'usb';
@@ -33,7 +34,7 @@ export const attachExit = () => {
     process.on('SIGTERM', cleanup);
 
     return cleanup;
-}
+};
 
 export async function detachDrive(bootPath: string) {
     const platform = os.platform();
@@ -44,6 +45,49 @@ export async function detachDrive(bootPath: string) {
         await execa('umount', [bootPath]);
     }
 }
+
+const DPI_TIMINGS = {
+    h_sync_polarity: 0,
+    h_front_porch: 14,
+    h_sync_pulse: 4,
+    h_back_porch: 12,
+    v_sync_polarity: 0,
+    v_front_porch: 2,
+    v_sync_pulse: 3,
+    v_back_porch: 9,
+    v_sync_offset_a: 0,
+    v_sync_offset_b: 0,
+    pixel_rep: 0,
+    interlaced: 0,
+    aspect_ratio: 3,
+};
+
+export const dpiConfig = (
+    h_active_pixels: number,
+    v_active_lines: number,
+    frame_rate: number,
+): Record<string, unknown> => ({
+    framebuffer_width: h_active_pixels,
+    framebuffer_height: v_active_lines,
+    framebuffer_depth: 16,
+    max_framebuffers: 2,
+    // https://www.raspberrypi.com/documentation/computers/legacy_config_txt.html#enable_dpi_lcd
+    enable_dpi_lcd: 1,
+    // https://www.raspberrypi.com/documentation/computers/legacy_config_txt.html#display_default_lcd
+    display_default_lcd: 0,
+    // https://www.raspberrypi.com/documentation/computers/legacy_config_txt.html#dpi_group-dpi_mode-dpi_output_format
+    dpi_group: 2,
+    dpi_mode: 87,
+    dpi_output_format: 458773,
+    [`# ${h_active_pixels}x${v_active_lines} @ ~${frame_rate} Hz timings`]: '',
+    // https://www.raspberrypi.com/documentation/computers/legacy_config_txt.html#dpi_timings
+    dpi_timings: timings({
+        ...DPI_TIMINGS,
+        h_active_pixels,
+        v_active_lines,
+        frame_rate,
+    }),
+});
 
 export const timings = ({
     h_active_pixels,
@@ -151,3 +195,16 @@ export async function getRemovableDrives(): Promise<Array<{ value: string; label
             })
     );
 }
+
+export const updateFile = (pathname: string, cb: (content: string) => string) => {
+    const content = fs.existsSync(pathname) ? fs.readFileSync(pathname, 'utf8') : '';
+    let updated = content;
+
+    try {
+        updated = cb(content);
+    } finally {
+        if (content !== updated) {
+            fs.writeFileSync(pathname, updated);
+        }
+    }
+};
