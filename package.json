@@ -1,6 +1,6 @@
 {
   "name": "@ankhzet/shushpie",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Automated provisioning to embedded over ssh",
   "author": "AnkhZet ankhzet@gmail.com",
   "type": "module",
@@ -20,7 +20,7 @@
     "dev:deploy": "tsc && node --enable-source-maps --inspect dist/deploy/manager.js",
     "watch:deploy": "node --watch --enable-source-maps --inspect dist/deploy/manager.js",
     "bump-version": "pnpm changeset version",
-    "release": "build && pnpm changeset publish"
+    "release": "pnpm build && pnpm changeset publish"
   },
   "dependencies": {
     "blessed": "^0.1.81",
@@ -38,5 +38,6 @@
   "engines": {
     "node": ">= 24"
   },
+  "packageManager": "pnpm@10.19.0",
   "private": true
 }
