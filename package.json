@@ -1,18 +1,26 @@
 {
   "name": "@ankhzet/shushpie",
   "version": "1.0.0",
-  "description": "Automated enabling of RNDIS on PRI without WiFi/Ethernet capabilities",
+  "description": "Automated provisioning to embedded over ssh",
   "author": "AnkhZet ankhzet@gmail.com",
   "type": "module",
-  "bin": "dist/index.js",
+  "bin": {
+    "shuhpie": "dist/index.js",
+    "shushploy": "dist/deploy/manager.js"
+  },
   "files": [
     "*.md",
     "dist/*"
   ],
   "scripts": {
     "build": "tsc",
+    "watch": "tsc -w",
     "start": "tsc && node dist/index.js",
-    "dev": "tsc && node --inspect dist/index.js"
+    "dev": "tsc && node --enable-source-maps --inspect dist/index.js",
+    "dev:deploy": "tsc && node --enable-source-maps --inspect dist/deploy/manager.js",
+    "watch:deploy": "node --watch --enable-source-maps --inspect dist/deploy/manager.js",
+    "bump-version": "pnpm changeset version",
+    "release": "build && pnpm changeset publish"
   },
   "dependencies": {
     "blessed": "^0.1.81",
@@ -22,6 +30,7 @@
     "usb": "^2.16.0"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.8",
     "@types/blessed": "^0.1.27",
     "@types/node": "^24.1.0",
     "typescript": "^5.9.3"

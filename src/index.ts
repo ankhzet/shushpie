@@ -18,25 +18,33 @@ import {
 } from './utils.js';
 import { selectFromList, askYesNo, showMessage, makeProgram, pause, statusBox, steps } from './ui.js';
 
-async function waitForUsb(screen: Widgets.Screen): Promise<string> {
-    return showMessage({
-        screen,
-        content: 'Waiting for Raspberry Pi USB connection...\n\n (Connect Pi via USB cable)',
-        style: { border: { fg: 'yellow' } },
-        cb: () => waitForUsbConnection(),
-    }).finally(() => pause(
-        screen,
-        `USB device connected\nWaiting to boot...`,
-        30000,
-    ));
-}
+async function waitForUsb(screen: Widgets.Screen): Promise<string | null> {
+    const shouldWait = await askYesNo(screen, ' Wait for USB? ');
 
-async function searchUsb(screen: Widgets.Screen): Promise<string | null> {
-    return selectFromList(
+    if (shouldWait) {
+        return showMessage({
+            screen,
+            content: 'Waiting for Raspberry Pi USB connection...\n\n (Connect Pi via USB cable)',
+            style: { border: { fg: 'yellow' } },
+            cb: async () => {
+                const deviceName = await waitForUsbConnection();
+
+                await pause(
+                    screen,
+                    `USB device connected:\n\t${deviceName}\nWaiting to boot...`,
+                    30000,
+                );
+
+                return deviceName;
+            },
+        });
+    }
+
+    return selectFromList({
         screen,
-        'Select Raspberry Pi USB device',
-        'Raspberry Pi not found',
-        async () => {
+        title: 'Select Raspberry Pi USB device',
+        none: 'Raspberry Pi not found',
+        cb: async () => {
             const devices = await enumerateUsbDevices();
 
             return devices.map((value) => ({
@@ -44,7 +52,7 @@ async function searchUsb(screen: Widgets.Screen): Promise<string | null> {
                 label: value,
             }));
         },
-    );
+    });
 }
 
 async function waitForPing(screen: Widgets.Screen, hostnames: string[]): Promise<string> {
@@ -75,15 +83,21 @@ async function waitForPing(screen: Widgets.Screen, hostnames: string[]): Promise
     });
 }
 
-async function trySsh(screen: Widgets.Screen, login: string): Promise<void> {
+async function trySsh(screen: Widgets.Screen, host: string, users: string[]): Promise<string | undefined> {
     return showMessage({
         screen,
-        content: `SSH to ${login}...`,
+        content: `SSH to ${host}...`,
         cb: async () => {
-            try {
-                await ssh(login, 'echo SSH OK');
-            } catch {
-                throw new Error('SSH failed. Check cable or wait longer.');
+            for (const user of users) {
+                const login = `${user}@${host}`;
+
+                try {
+                    await ssh(login, 'echo SSH OK');
+
+                    return login;
+                } catch {
+                    //
+                }
             }
         },
     });
@@ -98,7 +112,7 @@ async function testI2cDevice(screen: Widgets.Screen, login: string): Promise<boo
             try {
                 const { stdout } = await ssh(login, 'sudo i2cdetect -y 3');
 
-                if (stdout.includes('1b')) {
+                if (stdout!.toString().includes('1b')) {
                     return true;
                 }
 
@@ -121,11 +135,11 @@ async function configureDlpInput(screen: Widgets.Screen, login: string) {
                     login,
                     'sudo i2cset -y 3 0x1b 0x0c 0x00 0x00 0x00 0x13 i && sudo i2cset -y 3 0x1b 0x0b 0x00 0x00 0x00 0x00 i',
                 );
+
+                return true;
             } catch (e) {
                 throw new Error(`Failed to configure DLP: ${(e as Error).message}`);
             }
-
-            await pause(screen, `DLP configured for external DPI! Projector should lock to signal.`);
         },
     });
 }
@@ -172,79 +186,99 @@ async function setupBootDrive(bootPath: string, configureDlp = false) {
     });
 }
 
-await makeProgram(async ({ screen }) => {
+await makeProgram('Raspberry Pi Zero USB Setup', async ({ screen }) => {
     const status = statusBox(screen);
-
     const step = steps(screen);
 
     screen.render();
 
-    status.content('Ready.');
+    const state: {
+        bootPath: string | null;
+        ejected: boolean;
+        configureDlp: boolean;
+        dlpOk: boolean;
+        i2cOk: boolean;
+        deviceName: string | null;
+        host: string;
+        login?: string;
+    } = {
+        bootPath: '',
+        deviceName: '',
+        host: '',
+        login: '',
+        ejected: false,
+        configureDlp: false,
+        dlpOk: false,
+        i2cOk: false,
+    };
+
+    const updateState = (update: Partial<typeof state>) => {
+        Object.assign(state, update);
+
+        status.content([
+            state.configureDlp ? (state.dlpOk ? chalk.green(`DLP`) : chalk.yellow(`DLP`)) : chalk.gray(`DLP`),
+            state.login ? chalk.green(`SSH`) : chalk.gray(`SSH`),
+            state.i2cOk ? chalk.green(`I²C`) : chalk.gray(`I²C`),
+            `Media: ${state.bootPath ? (state.ejected ? chalk.gray(state.bootPath) : chalk.green(state.bootPath)) : '?'}`,
+            `USB: ${state.deviceName ? chalk.green(state.deviceName) : '?'}`,
+            `Host: ${state.host ? chalk.green(state.host) : '?'}`,
+            `User: ${state.login ? chalk.green(state.login) : '?'}`,
+        ].join(' | '));
+    };
+
+    updateState({});
+
     step.next('Looking for boot drive...');
-    const bootPath = await selectFromList(
-        screen,
-        'Select boot drive',
-        'No removable drives found.',
-        getRemovableDrives,
-    );
-
-    let configureDlp = false;
-
-    if (bootPath) {
-        configureDlp = await askYesNo(screen, ' Configure for DLPDLCR2000EVM\n (DPI + I²C on GPIO 23/24)? ');
-
-        step.next('Configuring boot drive...');
-        await setupBootDrive(bootPath, configureDlp);
-        await showMessage({
+    updateState({
+        bootPath: await selectFromList({
             screen,
-            content: configureDlp ? 'Boot + DLP config written!' : ' oot configuration updated!',
+            title: 'Select boot drive',
+            none: 'No removable drives found.',
+            cb: getRemovableDrives,
+        }),
+    });
+
+    if (state.bootPath) {
+        updateState({
+            configureDlp: await askYesNo(screen, ' Configure for DLPDLCR2000EVM\n (DPI + I²C on GPIO 23/24)? '),
         });
 
+        step.next(`Configuring Boot drive...`);
+        await setupBootDrive(state.bootPath, state.configureDlp);
+
         step.next('Ejecting drive...');
-        await detachDrive(bootPath);
-        await showMessage({ screen, content: 'Drive ejected!' });
-    } else {
-        status.content('Skipped boot drive setup.');
-        await showMessage({ screen, content: 'Skipped', style: { fg: 'yellow', bg: 'black' } });
+        await detachDrive(state.bootPath);
+        updateState({
+            ejected: true,
+        })
     }
 
     step.next('Connect your Pi to this computer via USB...');
-    const shouldWait = await askYesNo(screen, ' Wait for USB? ');
-    let deviceName;
-
-    if (shouldWait) {
-        status.content('Waiting for USB...');
-        deviceName = await waitForUsb(screen);
-        status.content(`Connected "${deviceName}", waiting to boot...`);
-    } else {
-        deviceName = (await searchUsb(screen)) || 'Unknown';
-    }
+    updateState({
+        deviceName: await waitForUsb(screen).then((v) => v || 'Unknown'),
+    });
 
     step.next('Waiting for Pi to respond...');
-    status.content(`Pinging on "${deviceName}"...`);
-    const host = await waitForPing(screen, ['fab.local', 'raspberrypi.local', '169.254.0.2']);
-    const login = `pi@${host}`;
+    updateState({
+        host: await waitForPing(screen, ['fab.local', 'raspberrypi.local', '169.254.0.2']),
+    });
 
     step.next('Connecting via SSH...');
-    status.content(`Successfully pinged "${host}". Trying to connect via SSH...`);
-    await trySsh(screen, login);
+    updateState({
+        login: await trySsh(screen, state.host, ['pi', 'fab']),
+    });
 
-    status.content(`Success! Pi is reachable over USB (${deviceName} -> ${login})!`);
-
-    if (configureDlp) {
+    if (state.configureDlp && state.login) {
         step.next('Testing I²C (DLPC2607 at 0x1b)...');
-        const i2cOk = await testI2cDevice(screen, login);
+        updateState({
+            i2cOk: await testI2cDevice(screen, state.login),
+        });
 
-        status.content('I²C device 0x1b (DLPC2607) found!');
-
-        if (i2cOk) {
-            step.next('Configuring DLP for external DPI...');
-            await configureDlpInput(screen, host);
-        } else {
-            throw new Error('I²C test failed.\n Check wiring and reboot Pi before retry.');
-        }
+        step.next('Configuring DLP for external DPI...');
+        updateState({
+            dlpOk: await configureDlpInput(screen, state.login),
+        });
     }
 
-    status.content('Done!');
-    await sleep(3000);
+    await pause(screen, `Done.`, 3000);
 });

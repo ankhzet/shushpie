@@ -1,4 +1,4 @@
-import { Widgets, type BlessedProgram, box, screen, program, list } from 'blessed';
+import blessed, { Widgets, type BlessedProgram } from 'blessed';
 import { attachExit, sleep } from './utils.js';
 import chalk from 'chalk';
 
@@ -15,7 +15,7 @@ export const dialog = async <T>(
     // @ts-ignore
     const { promise, resolve } = Promise.withResolvers<T | null>();
 
-    const container = box({
+    const container = blessed.box({
         top: 'center',
         left: 'center',
         width: '80%',
@@ -44,13 +44,13 @@ export const dialog = async <T>(
 };
 
 const mssgBox = (container: Widgets.BoxElement, message: string) => {
-    container.append(box({
+    container.append(blessed.box({
         top: 2,
         left: 'center',
         content: message,
         style: { fg: 'yellow' },
     }));
-    container.append(box({
+    container.append(blessed.box({
         bottom: 0,
         left: 0,
         height: 1,
@@ -61,17 +61,17 @@ const mssgBox = (container: Widgets.BoxElement, message: string) => {
 
 type AsyncListItem = { label: string; value: string };
 
-export async function selectFromList(
+export async function selectFromList({ screen, title, none = '', cb }: {
     screen: Widgets.Screen,
     title: string,
-    none: string,
+    none?: string,
     cb: () => Promise<AsyncListItem[]>,
-): Promise<string | null> {
+}): Promise<string | null> {
     return dialog(screen, async ({ container, submit }) => {
         const items = await cb();
         const total = items.length;
 
-        container.append(box({
+        container.append(blessed.box({
             top: 0,
             left: 0,
             height: 1,
@@ -79,8 +79,10 @@ export async function selectFromList(
             tags: true,
         }));
 
+        container.focus();
+
         if (total) {
-            const listEl = list({
+            const listEl = blessed.list({
                 top: 2,
                 left: 0,
                 height: total + 2,
@@ -91,10 +93,9 @@ export async function selectFromList(
                 },
             });
             listEl.select(0);
-            container.focus();
             container.append(listEl);
 
-            container.append(box({
+            container.append(blessed.box({
                 bottom: 0,
                 left: 0,
                 height: 1,
@@ -130,30 +131,32 @@ export async function selectFromList(
 }
 
 export async function pause(screen: Widgets.Screen, message: string, closeAfter?: number): Promise<void> {
-    const container = box({
+    const container = blessed.box({
         top: 'center',
         left: 'center',
         width: 'shrink',
         height: 'shrink',
-        border: { type: 'line' },
-        style: { border: { fg: 'cyan' } },
         keys: true,
         mouse: true,
     });
 
-    const msg = box({
-        left: 0,
+    const msg = blessed.box({
         width: '100%',
-        height: 'shrink',
+        height: '100%',
+        top: 'center',
+        left: 'center',
         content: message,
+        padding: 1,
+        border: { type: 'line' },
+        style: { border: { fg: 'cyan' } },
         tags: true,
     });
     container.append(msg);
 
-    const btn = box({
-        top: 4,
+    const btn = blessed.box({
+        bottom: 0,
         left: 'center',
-        width: 30,
+        width: 'shrink',
         height: 1,
         content: ' [ Press Enter to continue ] ',
         style: { bg: 'blue', fg: 'white', bold: true },
@@ -180,7 +183,7 @@ export async function pause(screen: Widgets.Screen, message: string, closeAfter?
 }
 
 export async function askYesNo(screen: Widgets.Screen, question: string): Promise<boolean> {
-    const container = box({
+    const container = blessed.box({
         top: 'center',
         left: 'center',
         width: 'shrink',
@@ -191,12 +194,12 @@ export async function askYesNo(screen: Widgets.Screen, question: string): Promis
         mouse: true,
     });
 
-    container.append(box({
+    container.append(blessed.box({
         content: question,
         tags: true,
     }));
 
-    const btnYes = box({
+    const btnYes = blessed.box({
         top: 2,
         left: 2,
         width: 10,
@@ -204,7 +207,7 @@ export async function askYesNo(screen: Widgets.Screen, question: string): Promis
         content: ' [ Yes ] ',
         style: { bg: 'blue', fg: 'white' },
     });
-    const btnNo = box({
+    const btnNo = blessed.box({
         top: 2,
         left: 15,
         width: 10,
@@ -250,7 +253,7 @@ export async function showMessage<T = void>({
     cb?: (el: Widgets.BoxElement, content: (c: string) => void) => Promise<T>;
     duration?: never
 })): Promise<T> {
-    const boxEl = box({
+    const boxEl = blessed.box({
         top: 'center',
         left: 'center',
         width: 'shrink',
@@ -271,56 +274,59 @@ export async function showMessage<T = void>({
         return await cb!(boxEl, (content) => {
             boxEl.setContent(content && ` ${content} `);
             screen.render();
-        })
+        });
     } finally {
         boxEl.destroy();
         screen.render();
     }
 }
 
-export const makeProgram = async (fn: (handles: {
+export const makeProgram = async (title: string, fn: (handles: {
     screen: Widgets.Screen;
     program: BlessedProgram
-}) => Promise<void>) => {
-    const cleanup = attachExit();
+}) => Promise<void | unknown>) => {
+    const { cleanup, interrupt } = attachExit();
 
     const main = async () => {
-        const programEl = program({
+        const program = blessed.program({
             smartCSR: true,
-            title: 'Raspberry Pi Zero USB Setup',
+            title,
         });
 
-        const screenEl = screen({
+        const screen = blessed.screen({
             smartCSR: true,
-            title: 'Raspberry Pi Zero USB Setup',
-            program: programEl,
+            title,
+            program,
         });
 
-        screenEl.key(['C-c'], cleanup);
+        screen.key(['C-c'], interrupt);
 
         try {
             await fn({
-                program: programEl,
-                screen: screenEl,
+                program,
+                screen,
             });
         } catch (e: any) {
             await pause(
-                screenEl,
+                screen,
                 ` ${String(e.message || e)} \n\n Press Enter to continue... `,
             );
 
             throw e;
         } finally {
-            screenEl.destroy();
-            programEl.clear();
+            screen.destroy();
+            program.clear();
         }
     };
 
     return main().catch((e) => console.error(e)).finally(cleanup);
 };
 
-export const statusBox = (screen: Widgets.Screen) => {
-    const statusBox = box({
+export const statusBox = (
+    screen: Widgets.Screen,
+    { dull = true, content: init, ...rest }: Partial<Widgets.BoxOptions> & { dull?: boolean } = {},
+) => {
+    const box = blessed.box({
         bottom: 0,
         left: 0,
         width: '100%',
@@ -328,28 +334,47 @@ export const statusBox = (screen: Widgets.Screen) => {
         content: '',
         tags: true,
         style: { fg: 'white' },
+        shrink: true,
+        ...rest,
     });
-    screen.append(statusBox);
+    screen.append(box);
+
+    const content = (text: string) => {
+        box.setContent(`[ ${dull ? chalk.gray(text) : text} ]`);
+        screen.render();
+    };
+    const preserve = async <T = void>(cb: () => T | Promise<T>) => {
+        const current = box.getContent();
+
+        try {
+            return await cb();
+        } finally {
+            box.setContent(current);
+            screen.render();
+        }
+    };
+
+    if (init) {
+        content(init);
+    }
 
     return {
-        content: (text: string) => {
-            statusBox.setContent(` ${chalk.gray(text)} `);
-            screen.render();
-        },
+        content,
+        preserve,
         destroy: () => {
-            statusBox.destroy();
+            box.destroy();
             screen.render();
         },
     };
-}
+};
 
 export const steps = (screen: Widgets.Screen, options?: { top: number; left: number }) => {
     let steps = 0;
     const stepElements: Widgets.BoxElement[] = [];
-    const next = (text: string) => {
+    const next = (text: string, ammend?: string) => {
         const prev = stepElements[steps - 1];
         const top = steps++ + (options?.top || 0);
-        const stepBox = box({
+        const stepBox = blessed.box({
             top,
             left: (options?.left || 0),
             width: '100%',
@@ -360,7 +385,7 @@ export const steps = (screen: Widgets.Screen, options?: { top: number; left: num
         });
 
         if (prev) {
-            prev.setContent(prev.content + chalk.green(' Done. '));
+            prev.setContent(prev.content + (ammend ?? chalk.green(' Done. ')));
         }
 
         screen.append(stepBox);
@@ -378,4 +403,4 @@ export const steps = (screen: Widgets.Screen, options?: { top: number; left: num
             screen.render();
         },
     };
-}
+};

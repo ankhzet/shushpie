@@ -3,37 +3,65 @@ import fs from 'node:fs';
 import drivelist from 'drivelist';
 import chalk from 'chalk';
 import { usb, type Device } from 'usb';
-import { execa } from 'execa';
+import { execa, type Options } from 'execa';
 
 import type { DpiTimings } from './types.js';
 
 export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-export const ssh = async (host: string, commands: string) => execa('ssh', [
+export const ssh = async (host: string, commands: string | string[], options?: Options) => execa('ssh', [
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'ConnectTimeout=5',
     host,
-    commands,
-]);
+    Array.isArray(commands) ? commands.join('\n') : commands,
+], options);
+
+export type SSHResult = Record<'stdout' | 'stderr', string>;
+
+export const testSSH = async ({ host, commands, test = (r) => !r.stderr, ...options }: Partial<Options> & {
+    host: string;
+    commands: string | string[];
+    test?: (r: SSHResult) => boolean;
+}): Promise<SSHResult & { success: boolean }> => {
+    try {
+        throw await ssh(host, commands, { encoding: 'utf8', ...options });
+    } catch (e: any) {
+        const result = ('stdout' in e) ? {
+            stdout: e.stdout.toString(),
+            stderr: e.stderr.toString(),
+        } : {
+            stdout: '',
+            stderr: `${e.message || e}`,
+        };
+
+        return Object.assign(result, {
+            success: test(result),
+        });
+    }
+};
 
 export const ping = (host: string) => execa('ping', ['-c', '1', '-W', '1', host]);
 
 export const attachExit = () => {
     let isExiting = false;
 
-    async function cleanup() {
+    function cleanup() {
+        usb.removeAllListeners();
+    }
+
+    async function interrupt() {
         if (isExiting) return;
         isExiting = true;
 
-        usb.removeAllListeners();
         console.log(chalk.gray('\n👋 Interrupted. Exiting gracefully.'));
+        cleanup();
         process.exit(0);
     }
 
-    process.on('SIGINT', cleanup);
-    process.on('SIGTERM', cleanup);
+    process.on('SIGINT', interrupt);
+    process.on('SIGTERM', interrupt);
 
-    return cleanup;
+    return { cleanup, interrupt };
 };
 
 export async function detachDrive(bootPath: string) {
@@ -183,7 +211,9 @@ export async function getRemovableDrives(): Promise<Array<{ value: string; label
     return (
         drives
             .filter((drive) => (
-                drive.isRemovable && !drive.mountpoints.some(p => p.path.includes('/Library/'))
+                drive.isRemovable
+                && drive.mountpoints.length
+                && !drive.mountpoints.some(p => p.path.includes('/Library/'))
             ))
             .map((drive) => {
                 const paths = drive.mountpoints.map(p => p.path);
