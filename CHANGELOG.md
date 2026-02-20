@@ -1,7 +1,7 @@
 # @ankhzet/shushpie
 
-## 0.1.0
+## 0.0.1
 
-### Minor Changes
+### Patch Changes
 
 - Initial release

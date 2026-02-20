@@ -1,6 +1,6 @@
 {
   "name": "@ankhzet/shushpie",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Automated provisioning to embedded over ssh",
   "author": "AnkhZet ankhzet@gmail.com",
   "type": "module",
